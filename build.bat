@@ -1,0 +1,5 @@
+@echo off
+echo Rebuilding RustServerBrowser.exe ...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0build.ps1"
+echo.
+pause

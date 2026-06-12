@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rust Server Browser — поиск серверов</title>
+<link rel="preconnect" href="https://api.battlemetrics.com">
+<style>
+  :root{
+    --bg:#0e0f12; --bg2:#16181d; --card:#1b1e25; --card2:#22262f;
+    --line:#2c313c; --txt:#e7e9ee; --muted:#8b93a3; --muted2:#5f6675;
+    --accent:#ce422b; --accent2:#ff6b4a; --good:#43b581; --warn:#e0a32e; --bad:#d94b3b;
+    --blue:#4a8fe0; --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 70% -10%, #1d1410 0%, transparent 60%),
+               radial-gradient(900px 500px at -10% 10%, #14181f 0%, transparent 55%),
+               var(--bg);
+    color:var(--txt);
+    font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; min-height:100vh;
+  }
+  a{color:var(--accent2);text-decoration:none}
+  .wrap{max-width:1280px;margin:0 auto;padding:0 18px 80px}
+
+  /* Header */
+  header.top{
+    position:sticky;top:0;z-index:30;backdrop-filter:blur(10px);
+    background:linear-gradient(180deg, rgba(14,15,18,.92), rgba(14,15,18,.7));
+    border-bottom:1px solid var(--line);
+  }
+  .top-inner{max-width:1280px;margin:0 auto;padding:14px 18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .logo{display:flex;align-items:center;gap:11px;font-weight:800;font-size:20px;letter-spacing:.3px}
+  .logo .mark{
+    width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:linear-gradient(135deg,var(--accent),#7d2417);box-shadow:0 4px 14px rgba(206,66,43,.4);
+    font-size:18px;
+  }
+  .logo small{display:block;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.5px}
+  .stats{display:flex;gap:18px;margin-left:auto;flex-wrap:wrap}
+  .stat{display:flex;flex-direction:column;line-height:1.1}
+  .stat b{font-size:18px}
+  .stat span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+
+  /* Layout */
+  .layout{display:grid;grid-template-columns:300px 1fr;gap:22px;margin-top:22px}
+  @media(max-width:920px){.layout{grid-template-columns:1fr}}
+
+  /* Filters panel */
+  .panel{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;align-self:start;position:sticky;top:84px;
+  }
+  @media(max-width:920px){.panel{position:static}}
+  .panel h3{margin:0 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .fgroup{margin:18px 0 0}
+  .fgroup:first-of-type{margin-top:14px}
+  label.lab{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600;letter-spacing:.3px}
+  input[type=text],input[type=number],select{
+    width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--txt);
+    border-radius:10px;padding:10px 12px;font-size:14px;outline:none;transition:.15s;
+  }
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(206,66,43,.15)}
+  select{appearance:none;cursor:pointer;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b93a3' stroke-width='3'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 12px center;padding-right:34px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{
+    border:1px solid var(--line);background:var(--bg2);color:var(--muted);
+    padding:7px 12px;border-radius:20px;font-size:12.5px;cursor:pointer;transition:.15s;font-weight:600;user-select:none;
+  }
+  .chip:hover{border-color:var(--muted)}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 3px 10px rgba(206,66,43,.35)}
+  .toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;cursor:pointer}
+  .toggle span{font-size:13.5px}
+  .sw{width:42px;height:24px;border-radius:20px;background:var(--line);position:relative;transition:.2s;flex:none}
+  .sw::after{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;top:3px;left:3px;transition:.2s}
+  .toggle.on .sw{background:var(--good)}
+  .toggle.on .sw::after{left:21px}
+  .btn{
+    width:100%;border:none;border-radius:10px;padding:11px;font-size:14px;font-weight:700;cursor:pointer;
+    background:linear-gradient(135deg,var(--accent),#9c3120);color:#fff;transition:.15s;letter-spacing:.3px;
+  }
+  .btn:hover{filter:brightness(1.1)}
+  .btn.ghost{background:var(--bg2);border:1px solid var(--line);color:var(--muted);margin-top:8px}
+  .btn.ghost:hover{color:var(--txt);border-color:var(--muted)}
+
+  /* Results toolbar */
+  .toolbar{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+  .search-big{flex:1;min-width:220px;position:relative}
+  .search-big input{padding-left:40px;font-size:15px}
+  .search-big svg{position:absolute;left:13px;top:50%;transform:translateY(-50%);opacity:.5}
+  .count-pill{font-size:13px;color:var(--muted);white-space:nowrap}
+  .sortbox{width:auto;min-width:170px}
+  .scanbtn{border:1px solid var(--accent);background:rgba(206,66,43,.14);color:#ff8e72;border-radius:10px;padding:9px 14px;font-size:13.5px;font-weight:700;cursor:pointer;white-space:nowrap;transition:.15s}
+  .scanbtn:hover{background:rgba(206,66,43,.24)}
+  .scanbtn.busy{background:rgba(217,75,59,.2);border-color:var(--bad);color:#ff9a8a}
+  .scanbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin-top:4px;font-size:13.5px;color:var(--muted)}
+  .scanbar b{color:var(--txt)}
+  .scanbar .dot{width:9px;height:9px;border-radius:50%;background:var(--good);animation:pulse 1.2s infinite;flex:none}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(67,181,129,.55)}70%{box-shadow:0 0 0 8px rgba(67,181,129,0)}100%{box-shadow:0 0 0 0 rgba(67,181,129,0)}}
+
+  /* Cards */
+  .grid{display:grid;grid-template-columns:1fr;gap:14px}
+  .server{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+    display:grid;grid-template-columns:230px 1fr;transition:.18s;position:relative;
+  }
+  @media(max-width:680px){.server{grid-template-columns:1fr}}
+  .server:hover{border-color:#3a4150;transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .thumb{position:relative;background:linear-gradient(135deg,#23262e,#15171c);min-height:150px}
+  .thumb img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+  .thumb .ph{position:absolute;inset:0;display:grid;place-items:center;font-size:34px;opacity:.25}
+  .media{display:flex;flex-direction:column;background:#13151b}
+  .thumb{flex:1 0 148px}
+  .maptile{position:relative;display:block;height:122px;border-top:1px solid var(--line);background:#0c0e13;overflow:hidden}
+  .maptile img{width:100%;height:100%;object-fit:cover;transition:.25s}
+  .maptile:hover img{transform:scale(1.07)}
+  .maptile span{position:absolute;left:7px;bottom:7px;background:rgba(0,0,0,.66);backdrop-filter:blur(3px);color:#dfe4ec;font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:7px;letter-spacing:.3px}
+  .rankbadge{
+    position:absolute;top:10px;left:10px;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);
+    color:#ffd479;border:1px solid rgba(255,212,121,.3);padding:4px 9px;border-radius:8px;font-size:12px;font-weight:800;
+  }
+  .body{padding:15px 17px;display:flex;flex-direction:column;gap:9px;min-width:0}
+  .sname{font-size:16.5px;font-weight:700;line-height:1.25;display:flex;gap:8px;align-items:flex-start}
+  .flag{font-size:18px;flex:none;line-height:1.2}
+  .badges{display:flex;flex-wrap:wrap;gap:6px}
+  .badge{font-size:11px;font-weight:700;padding:3px 9px;border-radius:6px;letter-spacing:.3px;border:1px solid transparent}
+  .b-modded{background:rgba(206,66,43,.16);color:#ff8e72;border-color:rgba(206,66,43,.3)}
+  .b-official{background:rgba(74,143,224,.16);color:#7fb2f0;border-color:rgba(74,143,224,.3)}
+  .b-vanilla{background:rgba(67,181,129,.14);color:#5fd6a0;border-color:rgba(67,181,129,.3)}
+  .b-pve{background:rgba(224,163,46,.14);color:#f0c46a;border-color:rgba(224,163,46,.3)}
+  .b-rate{background:rgba(86,204,242,.14);color:#7fd3f5;border-color:rgba(86,204,242,.32)}
+  .b-region{background:var(--card2);color:var(--muted);border-color:var(--line)}
+  .meta{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--muted)}
+  .meta b{color:var(--txt);font-weight:600}
+  .desc{font-size:12.5px;color:var(--muted);line-height:1.5;white-space:pre-wrap;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
+  .desc.open{-webkit-line-clamp:unset}
+  .pbar{height:7px;border-radius:5px;background:var(--bg2);overflow:hidden;margin-top:2px}
+  .pbar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--good),#6fe0a8)}
+  .pbar i.mid{background:linear-gradient(90deg,var(--warn),#ffce5e)}
+  .pbar i.high{background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .prow{display:flex;align-items:center;gap:10px}
+  .prow .pnum{font-size:13px;font-weight:700;white-space:nowrap}
+  .prow .pnum span{color:var(--muted);font-weight:500}
+  .pbar{flex:1}
+  .queue{font-size:11px;color:var(--warn);font-weight:700}
+  .actions{display:flex;gap:8px;margin-top:2px;flex-wrap:wrap}
+  .act{
+    border:1px solid var(--line);background:var(--bg2);color:var(--txt);padding:8px 13px;border-radius:9px;
+    font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:6px;
+  }
+  .act:hover{border-color:var(--muted)}
+  .act.primary{background:linear-gradient(135deg,var(--accent),#9c3120);border-color:transparent;color:#fff}
+  .act.primary:hover{filter:brightness(1.1)}
+
+  /* states */
+  .state{text-align:center;padding:70px 20px;color:var(--muted)}
+  .state .big{font-size:46px;margin-bottom:10px}
+  .spinner{width:42px;height:42px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:spin .8s linear infinite;margin:0 auto 16px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .skel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);height:160px;
+    background:linear-gradient(100deg,var(--card) 30%,var(--card2) 50%,var(--card) 70%);
+    background-size:200% 100%;animation:sh 1.3s infinite}
+  @keyframes sh{to{background-position:-200% 0}}
+  .loadmore{margin:22px auto 0;display:block;max-width:280px}
+  .toast{
+    position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:#23262e;border:1px solid var(--line);color:var(--txt);padding:12px 20px;border-radius:12px;
+    font-size:14px;font-weight:600;opacity:0;pointer-events:none;transition:.25s;z-index:50;box-shadow:0 10px 30px rgba(0,0,0,.4)
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .hint{font-size:11px;color:var(--muted2);margin-top:6px;line-height:1.4}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <div class="logo">
+      <div class="mark">🦀</div>
+      <div>Rust Server Browser
+        <small>поиск серверов · BattleMetrics</small>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="stServers">—</b><span>серверов</span></div>
+      <div class="stat"><b id="stPlayers">—</b><span>игроков онлайн</span></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="layout">
+
+    <!-- FILTERS -->
+    <aside class="panel">
+      <h3>Фильтры</h3>
+
+      <div class="fgroup">
+        <label class="lab">Регион / локация</label>
+        <select id="fRegion">
+          <option value="">🌍 Любой регион</option>
+          <option value="EU">🇪🇺 Европа (EU)</option>
+          <option value="NA">🌎 Северная Америка</option>
+          <option value="SA">🌎 Южная Америка</option>
+          <option value="AS">🌏 Азия</option>
+          <option value="OCE">🦘 Океания</option>
+          <option value="RU">🇷🇺 Россия / СНГ</option>
+        </select>
+        <div class="hint">Локация = регион хостинга. Чем ближе регион — тем ниже пинг в игре.</div>
+      </div>
+
+      <div class="fgroup">
+        <label class="lab">Страна (код, напр. US, DE, RU)</label>
+        <input type="text" id="fCountry" placeholder="напр. US, GB, RU…" maxlength="2" autocomplete="off">
+      </div>
+
+      <div class="fgroup">
+        <label class="lab">Тип сервера</label>
+        <div class="chips" id="fType">
+          <div class="chip on" data-v="all">Все</div>
+          <div class="chip" data-v="official">Официальные</div>
+          <div class="chip" data-v="community">Community</div>
+          <div class="chip" data-v="modded">Modded</div>
+          <div class="chip" data-v="vanilla">Vanilla</div>
+        </div>
+      </div>
+
+      <div class="fgroup">
+        <label class="lab">Игроки онлайн</label>
+        <div class="row2">
+          <input type="number" id="fPmin" placeholder="мин" min="0">
+          <input type="number" id="fPmax" placeholder="макс" min="0">
+        </div>
+      </div>
+
+      <div class="fgroup">
+        <label class="lab">Размер карты (world size)</label>
+        <div class="row2">
+          <input type="number" id="fWmin" placeholder="мин" min="0" step="500">
+          <input type="number" id="fWmax" placeholder="макс" min="0" step="500">
+        </div>
+      </div>
+
+      <div class="fgroup">
+        <label class="lab">Скорость фарма (rate)</label>
+        <div class="chips" id="fRate">
+          <div class="chip on" data-v="">Любой</div>
+          <div class="chip" data-v="1">1x</div>
+          <div class="chip" data-v="2">2x</div>
+          <div class="chip" data-v="3">3x</div>
+          <div class="chip" data-v="5">5x</div>
+          <div class="chip" data-v="10">10x+</div>
+          <div class="chip" data-v="100">100x+</div>
+        </div>
+        <div class="hint">x2 = ресурсы падают в 2× быстрее. Берётся из настроек сервера, иначе из названия.</div>
+      </div>
+
+      <div class="fgroup">
+        <label class="lab">Тип карты</label>
+        <select id="fMapType">
+          <option value="">🗺️ Любой тип карты</option>
+          <option value="procedural">Процедурная (Procedural)</option>
+          <option value="custom">Кастомная (Custom)</option>
+          <option value="barren">Barren</option>
+          <option value="premade">Готовые (Hapis / Savas)</option>
+        </select>
+      </div>
+
+      <div class="fgroup">
+        <label class="lab">Карта (название содержит)</label>
+        <input type="text" id="fMap" placeholder="напр. Procedural, Custom…" autocomplete="off">
+      </div>
+
+      <div class="fgroup">
+        <div class="toggle on" id="tHideEmpty"><span>Скрыть пустые</span><div class="sw"></div></div>
+        <div class="toggle" id="tHideFull"><span>Скрыть заполненные</span><div class="sw"></div></div>
+        <div class="toggle" id="tRecentWipe"><span>Свежий вайп (≤ 3 дней)</span><div class="sw"></div></div>
+        <div class="toggle" id="tFvRecycler"><span>♻️ Переработчик на рыбачке</span><div class="sw"></div></div>
+        <div class="hint">Монументы API не отдаёт — ищем упоминание в названии/описании сервера. Сканируй базу, чтобы найти больше.</div>
+      </div>
+
+      <div class="fgroup">
+        <button class="btn" id="btnApply">Применить фильтры</button>
+        <button class="btn ghost" id="btnReset">Сбросить всё</button>
+      </div>
+    </aside>
+
+    <!-- RESULTS -->
+    <main>
+      <div class="toolbar">
+        <div class="search-big">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+          <input type="text" id="fSearch" placeholder="Поиск по названию сервера…" autocomplete="off">
+        </div>
+        <select id="fSort" class="sortbox">
+          <option value="-players">Сортировка: по игрокам ↓</option>
+          <option value="players">По игрокам ↑</option>
+          <option value="rank">По рейтингу (топ)</option>
+          <option value="name">По названию (A–Z)</option>
+        </select>
+        <button class="scanbtn" id="btnScan">🔍 Сканировать всё</button>
+        <div class="count-pill" id="countPill"></div>
+      </div>
+
+      <div class="grid" id="grid"></div>
+      <div id="stateZone"></div>
+    </main>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = "https://api.battlemetrics.com/servers";
+
+// ---- регион -> страны ----
+const REGIONS = {
+  EU:["GB","DE","FR","NL","SE","FI","PL","ES","IT","RU","UA","CZ","RO","AT","CH","BE","DK","NO","PT","IE","HU","BG","GR","RS","LT","LV","EE","SK","HR"],
+  NA:["US","CA","MX"],
+  SA:["BR","AR","CL","CO","PE","UY","VE","EC"],
+  AS:["SG","JP","KR","HK","CN","IN","TH","VN","ID","MY","PH","TR","IL","AE","KZ","TW"],
+  OCE:["AU","NZ"],
+  RU:["RU","UA","BY","KZ","KG","AM","GE","MD","AZ"]
+};
+const REGION_LABEL = {EU:"EU",NA:"NA",SA:"SA",AS:"ASIA",OCE:"OCE",RU:"RU/СНГ"};
+function regionOfCountry(cc){
+  for(const r in REGIONS) if(REGIONS[r].includes(cc)) return REGION_LABEL[r]||r;
+  return cc||"?";
+}
+
+// ---- state ----
+const state = {
+  region:"", country:"", types:["all"],
+  pmin:null, pmax:null, wmin:null, wmax:null, map:"", rate:"", mapType:"",
+  hideEmpty:true, hideFull:false, recentWipe:false, fvRecycler:false,
+  search:"", sort:"-players", autoScan:true,
+  nextUrl:null, loading:false, all:[]
+};
+
+// ---- helpers ----
+const $ = s=>document.querySelector(s);
+const grid = $("#grid"), stateZone = $("#stateZone");
+
+function flagEmoji(cc){
+  if(!cc||cc.length!==2) return "🏳️";
+  const A=0x1F1E6; return String.fromCodePoint(A+cc.charCodeAt(0)-65, A+cc.charCodeAt(1)-65);
+}
+function fmt(n){ return (n??0).toLocaleString("ru-RU"); }
+function timeAgo(iso){
+  if(!iso) return "—";
+  const d=(new Date(iso)).getTime(), now=Date.now(), s=Math.floor((now-d)/1000);
+  if(s<0) return "скоро";
+  const u=[["г",31536000],["мес",2592000],["д",86400],["ч",3600],["мин",60]];
+  for(const [l,sec] of u){ const v=Math.floor(s/sec); if(v>=1) return v+" "+l+" назад"; }
+  return "только что";
+}
+function nextWipe(iso){
+  if(!iso) return null;
+  const d=(new Date(iso)).getTime(), s=Math.floor((d-Date.now())/1000);
+  if(s<0) return null;
+  const dd=Math.floor(s/86400), hh=Math.floor((s%86400)/3600);
+  if(dd>0) return `через ${dd}д ${hh}ч`;
+  return `через ${hh}ч`;
+}
+function cleanDesc(t){
+  if(!t) return "";
+  return t.replace(/\[\/?[a-zA-Z0-9=#,"'\s]*\]/g,"") // strip bbcode
+          .replace(/\n{3,}/g,"\n\n").trim();
+}
+function esc(s){ const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+
+let toastT;
+function toast(msg){
+  const t=$("#toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),1800);
+}
+
+// ---- build API url ----
+function buildUrl(){
+  const p = new URLSearchParams();
+  p.set("filter[game]","rust");
+  p.set("filter[status]","online");
+  p.set("page[size]","100");
+  p.set("sort", state.sort);
+  if(state.search.trim()) p.set("filter[search]", state.search.trim());
+  if(state.pmin!=null) p.set("filter[players][min]", state.pmin);
+  if(state.pmax!=null) p.set("filter[players][max]", state.pmax);
+
+  // страны: приоритет — конкретная страна, иначе регион
+  let countries=[];
+  if(state.country) countries=[state.country.toUpperCase()];
+  else if(state.region && REGIONS[state.region]) countries=REGIONS[state.region];
+  // официальные / тип на стороне сервера
+  if(state.types.length===1 && state.types[0]==="official") p.set("filter[official]","true");
+
+  let url = API+"?"+p.toString();
+  for(const c of countries) url += "&filter[countries][]="+encodeURIComponent(c);
+  return url;
+}
+
+// rate (скорость фарма): из настроек сервера, иначе парсим из названия ("2x","x100")
+function gatherRate(a){
+  const d=a.details||{};
+  const r = d.rust_settings && d.rust_settings.rates && d.rust_settings.rates.gather;
+  if(typeof r==="number") return r;
+  const m=(a.name||"").match(/(?:^|[^a-z0-9])x ?(\d{1,5})|(\d{1,5}) ?x(?:[^a-z0-9]|$)/i);
+  if(m){ const v=+(m[1]||m[2]); if(v>=1&&v<=100000) return v; }
+  return null;
+}
+function rateMatch(sel, gr){
+  if(!sel) return true;
+  if(gr==null) return false;
+  if(sel==="10")  return gr>=10 && gr<100;
+  if(sel==="100") return gr>=100;
+  return gr===(+sel);
+}
+// классификация типа сервера — надёжно: флаги + название, а не только rust_type.
+// Многие "Vanilla 2x" имеют rust_type="modded" (стоит Oxide), поэтому ловим по имени.
+function classify(a){
+  const d=a.details||{};
+  const n=(a.name||"").toLowerCase();
+  const official = d.official===true;
+  const nameVanilla = n.includes("vanilla");
+  const modded = (d.rust_type==="modded" || d.rust_modded===true) && !nameVanilla && !official;
+  const vanilla = official || d.rust_type==="vanilla" || nameVanilla;
+  return {official, modded, vanilla, community:!official, pve:d.pve===true};
+}
+// тип карты
+function mapTypeOf(d){
+  const m=(d&&d.map?d.map:"").toLowerCase();
+  if(m.includes("procedural")) return "procedural";
+  if(m.includes("barren")) return "barren";
+  if(m.includes("hapis")||m.includes("savas")||m.includes("craggy")) return "premade";
+  return "custom";
+}
+// переработчик на рыбачке: API монументы не отдаёт, поэтому ищем в названии+описании
+// упоминание "recycler/переработчик" ВМЕСТЕ с "fishing village/рыбачка/FV"
+function hasFvRecycler(a){
+  const d=a.details||{};
+  const t=((a.name||"")+" "+(d.rust_description||"")).toLowerCase();
+  const rec=/(recycl|переработ)/.test(t);
+  const fv=/(fishing ?village|рыбач|рыбацк|рыбалк|\bfv\b|\bфв\b)/.test(t);
+  return rec && fv;
+}
+
+// ---- client-side filters (то, что API не умеет) ----
+function passClient(a){
+  const d=a.details||{};
+  // тип
+  const t=state.types;
+  if(!t.includes("all")){
+    const c=classify(a);
+    let ok=false;
+    if(t.includes("official")&&c.official) ok=true;
+    if(t.includes("community")&&c.community) ok=true;
+    if(t.includes("modded")&&c.modded) ok=true;
+    if(t.includes("vanilla")&&c.vanilla) ok=true;
+    if(!ok) return false;
+  }
+  // world size
+  const ws=d.rust_world_size;
+  if(state.wmin!=null && (ws==null||ws<state.wmin)) return false;
+  if(state.wmax!=null && (ws==null||ws>state.wmax)) return false;
+  // map name
+  if(state.map.trim()){
+    const m=(d.map||"").toLowerCase();
+    if(!m.includes(state.map.trim().toLowerCase())) return false;
+  }
+  // rate (скорость фарма)
+  if(!rateMatch(state.rate, gatherRate(a))) return false;
+  // тип карты
+  if(state.mapType && mapTypeOf(d)!==state.mapType) return false;
+  // переработчик на рыбачке
+  if(state.fvRecycler && !hasFvRecycler(a)) return false;
+  // hide empty / full
+  if(state.hideEmpty && a.players<=0) return false;
+  if(state.hideFull && a.maxPlayers>0 && a.players>=a.maxPlayers) return false;
+  // свежий вайп
+  if(state.recentWipe){
+    const w=d.rust_last_wipe; if(!w) return false;
+    if(Date.now()-(new Date(w)).getTime() > 3*86400*1000) return false;
+  }
+  return true;
+}
+
+// ---- render one card ----
+function cardHTML(s){
+  const a=s.attributes, d=a.details||{};
+  const cc=a.country||"";
+  const players=a.players||0, max=a.maxPlayers||0;
+  const pct = max>0 ? Math.min(100, Math.round(players/max*100)) : 0;
+  const cls = pct>=90?"high":pct>=60?"mid":"";
+  const queue = d.rust_queued_players||0;
+  const img = d.rust_headerimage||"";
+  const c=classify(a);
+  const gr=gatherRate(a);
+  const ip=a.ip, port=a.port, connect = ip?`${ip}:${port}`:"";
+  const mapThumb=(d.rust_maps&&d.rust_maps.thumbnailUrl)||"";
+  const mapUrl=(d.rust_maps&&d.rust_maps.url)||mapThumb;
+
+  const badges=[];
+  if(c.official) badges.push('<span class="badge b-official">OFFICIAL</span>');
+  else if(c.modded) badges.push('<span class="badge b-modded">MODDED</span>');
+  else if(c.vanilla) badges.push('<span class="badge b-vanilla">VANILLA</span>');
+  if(gr!=null) badges.push(`<span class="badge b-rate">${gr}x</span>`);
+  if(c.pve) badges.push('<span class="badge b-pve">PVE</span>');
+  badges.push(`<span class="badge b-region">${flagEmoji(cc)} ${esc(regionOfCountry(cc))}</span>`);
+
+  const desc = cleanDesc(d.rust_description);
+  const nw = nextWipe(d.rust_next_wipe);
+
+  return `<div class="server">
+    <div class="media">
+      <div class="thumb">
+        ${img?`<img src="${esc(img)}" loading="lazy" onerror="this.style.display='none'">`:`<div class="ph">🦀</div>`}
+        ${a.rank?`<div class="rankbadge">★ #${a.rank}</div>`:""}
+      </div>
+      ${mapThumb?`<a class="maptile" href="${esc(mapUrl)}" target="_blank" rel="noopener" title="Открыть карту мира на RustMaps">
+        <img src="${esc(mapThumb)}" loading="lazy" onerror="this.closest('.maptile').style.display='none'">
+        <span>🗺️ карта мира</span>
+      </a>`:""}
+    </div>
+    <div class="body">
+      <div class="sname"><span class="flag">${flagEmoji(cc)}</span><span>${esc(a.name||"Без названия")}</span></div>
+      <div class="badges">${badges.join("")}</div>
+      <div class="prow">
+        <div class="pnum">${fmt(players)} <span>/ ${fmt(max)}</span></div>
+        <div class="pbar"><i class="${cls}" style="width:${pct}%"></i></div>
+        ${queue>0?`<div class="queue">+${queue} в очереди</div>`:""}
+      </div>
+      <div class="meta">
+        <div>🗺️ <b>${esc(d.map||"—")}</b></div>
+        <div>📐 <b>${d.rust_world_size?fmt(d.rust_world_size):"—"}</b></div>
+        <div>🩸 вайп: <b>${timeAgo(d.rust_last_wipe)}</b></div>
+        ${nw?`<div>⏭️ след. вайп <b>${nw}</b></div>`:""}
+      </div>
+      ${desc?`<div class="desc" title="нажми, чтобы развернуть">${esc(desc)}</div>`:""}
+      <div class="actions">
+        ${connect?`<button class="act primary" data-connect="${esc(connect)}">▶ Подключиться</button>`:""}
+        ${connect?`<button class="act" data-copy="${esc(connect)}">📋 ${esc(connect)}</button>`:""}
+        <a class="act" href="https://www.battlemetrics.com/servers/rust/${a.id}" target="_blank" rel="noopener">📊 Подробнее</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---- render list (карточек в DOM не больше displayLimit — иначе тысячи серверов повесят браузер) ----
+const DISPLAY_STEP = 300;
+let displayLimit = DISPLAY_STEP;
+function getFiltered(){ return state.all.filter(s=>passClient(s.attributes)); }
+function totalOnline(){ return state.all.reduce((s,x)=>s+(x.attributes.players||0),0); }
+
+function render(reset){
+  if(reset) displayLimit = DISPLAY_STEP;
+  const filtered = getFiltered();
+  const slice = filtered.slice(0, displayLimit);
+  grid.innerHTML = slice.map(cardHTML).join("");
+  $("#countPill").textContent = `найдено ${fmt(filtered.length)} · показано ${fmt(slice.length)}`;
+  updateStats(); updateScanBtn();
+
+  let zone = "";
+  if(scanning){
+    zone += `<div class="scanbar"><span class="dot"></span>Сканирую базу серверов…
+      просканировано <b id="scanCount">${fmt(state.all.length)}</b> серв.,
+      реальный онлайн <b id="scanOnline">${fmt(totalOnline())}</b> игроков
+      <button class="act" id="btnStopScan" style="margin-left:auto">⏹ Остановить</button></div>`;
+  }
+  if(filtered.length > slice.length){
+    zone += `<button class="btn loadmore" id="btnShowMore">Показать ещё ${DISPLAY_STEP} ↓ <span style="opacity:.7">(ещё ${fmt(filtered.length-slice.length)})</span></button>`;
+  } else if(!scanning && state.nextUrl){
+    zone += `<button class="btn loadmore" id="btnMore">Загрузить ещё ↓</button>`;
+  } else if(filtered.length===0 && !state.loading && !scanning){
+    zone = `<div class="state"><div class="big">🔍</div>Ничего не найдено.<br>Попробуй ослабить фильтры.</div>`;
+  }
+  stateZone.innerHTML = zone;
+  const sm=$("#btnShowMore"); if(sm) sm.onclick=()=>{ displayLimit+=DISPLAY_STEP; render(false); };
+  const bm=$("#btnMore");     if(bm) bm.onclick=()=>loadMore();
+  const ss=$("#btnStopScan"); if(ss) ss.onclick=()=>stopScan();
+}
+
+// лёгкое обновление счётчиков во время скана (без перестройки карточек = без мерцания)
+function refreshScanLine(){
+  const filtered = getFiltered().length;
+  const c=$("#scanCount"), o=$("#scanOnline");
+  if(c) c.textContent=fmt(state.all.length);
+  if(o) o.textContent=fmt(totalOnline());
+  $("#countPill").textContent = `найдено ${fmt(filtered)} · показано ${fmt(Math.min(filtered,displayLimit))}`;
+  updateStats(); updateScanBtn();
+}
+
+// ---- fetch ----
+async function fetchPage(url){
+  const r = await fetch(url, {headers:{Accept:"application/json"}});
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+async function loadFresh(){
+  cancelScan();
+  state.loading=true; state.all=[]; state.nextUrl=null;
+  grid.innerHTML="";
+  stateZone.innerHTML = `<div class="state"><div class="spinner"></div>Загружаю серверы…</div>`;
+  try{
+    const j = await fetchPage(buildUrl());
+    state.all = j.data||[];
+    state.nextUrl = (j.links&&j.links.next)||null;
+    render(true);
+    if(state.autoScan && state.nextUrl) scanAll();   // фоновый дозагруз ВСЕХ серверов
+  }catch(e){
+    stateZone.innerHTML = `<div class="state"><div class="big">⚠️</div>Не удалось загрузить.<br><small>${esc(e.message)}</small><br><br><button class="btn" style="max-width:200px;margin:0 auto" onclick="loadFresh()">Повторить</button></div>`;
+  }finally{ state.loading=false; }
+}
+
+async function loadMore(){
+  if(!state.nextUrl||state.loading||scanning) return;
+  state.loading=true;
+  const b=$("#btnMore"); if(b){b.textContent="Загрузка…";b.disabled=true;}
+  try{
+    const j = await fetchPage(state.nextUrl);
+    state.all = state.all.concat(j.data||[]);
+    state.nextUrl = (j.links&&j.links.next)||null;
+    render(false);
+  }catch(e){ toast("Ошибка загрузки"); }
+  finally{ state.loading=false; }
+}
+
+// ---- сканер ВСЕХ серверов (учитывает rate-limit BattleMetrics: 60 запросов/мин) ----
+const SCAN_CAP = 20000;     // предохранитель от бесконечности
+const SCAN_DELAY = 1150;    // мс между запросами (~52/мин < лимита 60)
+let scanning=false, scanToken=null;
+
+function cancelScan(){ if(scanToken) scanToken.cancelled=true; scanning=false; }
+function stopScan(){ cancelScan(); render(false); toast("Сканирование остановлено"); }
+
+async function scanAll(){
+  if(scanning) return;
+  const token={cancelled:false}; scanToken=token; scanning=true;
+  let url=state.nextUrl, page=0;
+  render(false);
+  while(url && !token.cancelled && state.all.length<SCAN_CAP){
+    await sleep(SCAN_DELAY);
+    if(token.cancelled) break;
+    let j=null;
+    for(let k=0;k<3 && !token.cancelled;k++){
+      try{ j=await fetchPage(url); break; }
+      catch(e){ await sleep(5000*(k+1)); }   // backoff при 429 / обрыве сети
+    }
+    if(!j || token.cancelled) break;
+    state.all = state.all.concat(j.data||[]);
+    state.nextUrl = (j.links&&j.links.next)||null;
+    url = state.nextUrl; page++;
+    // пока экран не заполнен — показываем новые карточки; дальше при -players топ стабилен,
+    // поэтому только обновляем счётчики (для других сортировок — иногда перерисовываем)
+    if(getFiltered().length <= displayLimit) render(false);
+    else if(state.sort!=="-players" && page%8===0) render(false);
+    else refreshScanLine();
+  }
+  if(scanToken===token){
+    scanning=false; render(false);
+    if(!url) toast(`Готово: просканировано ${fmt(state.all.length)} серверов`);
+  }
+}
+
+function updateStats(){
+  $("#stServers").textContent = fmt(state.all.length) + (scanning?"…":(state.nextUrl?"+":""));
+  $("#stPlayers").textContent = fmt(totalOnline());
+}
+function updateScanBtn(){
+  const b=$("#btnScan"); if(!b) return;
+  if(scanning){ b.textContent=`⏹ Стоп (${fmt(state.all.length)})`; b.classList.add("busy"); }
+  else if(state.nextUrl){ b.textContent="🔍 Сканировать всё"; b.classList.remove("busy"); }
+  else { b.textContent="✓ Все загружены"; b.classList.remove("busy"); }
+}
+
+// ---- collect filters from UI ----
+function readUI(){
+  state.region = $("#fRegion").value;
+  state.country = $("#fCountry").value.trim();
+  state.pmin = $("#fPmin").value!==""?+$("#fPmin").value:null;
+  state.pmax = $("#fPmax").value!==""?+$("#fPmax").value:null;
+  state.wmin = $("#fWmin").value!==""?+$("#fWmin").value:null;
+  state.wmax = $("#fWmax").value!==""?+$("#fWmax").value:null;
+  state.map = $("#fMap").value;
+  state.mapType = $("#fMapType").value;
+  state.search = $("#fSearch").value;
+  state.sort = $("#fSort").value;
+}
+
+// ---- events ----
+$("#fType").addEventListener("click", e=>{
+  const c=e.target.closest(".chip"); if(!c) return;
+  const v=c.dataset.v;
+  if(v==="all"){ state.types=["all"]; }
+  else{
+    state.types = state.types.filter(x=>x!=="all");
+    if(state.types.includes(v)) state.types=state.types.filter(x=>x!==v);
+    else state.types.push(v);
+    if(state.types.length===0) state.types=["all"];
+  }
+  $("#fType").querySelectorAll(".chip").forEach(ch=>ch.classList.toggle("on", state.types.includes(ch.dataset.v)));
+  render(true);
+});
+
+function bindToggle(id,key){
+  $(id).addEventListener("click", ()=>{
+    state[key]=!state[key];
+    $(id).classList.toggle("on", state[key]);
+    render(true);
+  });
+}
+bindToggle("#tHideEmpty","hideEmpty");
+bindToggle("#tHideFull","hideFull");
+bindToggle("#tRecentWipe","recentWipe");
+bindToggle("#tFvRecycler","fvRecycler");
+
+$("#btnApply").onclick = ()=>{ readUI(); loadFresh(); };
+$("#fSort").addEventListener("change", ()=>{ readUI(); loadFresh(); });
+$("#btnScan").onclick = ()=>{
+  if(scanning){ state.autoScan=false; stopScan(); }
+  else if(state.nextUrl){ state.autoScan=true; scanAll(); }
+};
+
+let searchT;
+$("#fSearch").addEventListener("input", ()=>{
+  clearTimeout(searchT);
+  searchT=setTimeout(()=>{ readUI(); loadFresh(); }, 450);
+});
+// live client-side filters (без перезапроса)
+["#fWmin","#fWmax","#fMap"].forEach(id=>$(id).addEventListener("input",()=>{ readUI(); render(true); }));
+$("#fMapType").addEventListener("change",()=>{ readUI(); render(true); });
+$("#fRate").addEventListener("click", e=>{
+  const c=e.target.closest(".chip"); if(!c) return;
+  state.rate = (state.rate===c.dataset.v) ? "" : c.dataset.v;
+  $("#fRate").querySelectorAll(".chip").forEach(ch=>ch.classList.toggle("on", ch.dataset.v===state.rate));
+  render(true);
+});
+["#fPmin","#fPmax","#fCountry","#fRegion"].forEach(id=>$(id).addEventListener("change",()=>{ readUI(); loadFresh(); }));
+
+$("#btnReset").onclick = ()=>{
+  $("#fRegion").value=""; $("#fCountry").value=""; $("#fPmin").value=""; $("#fPmax").value="";
+  $("#fWmin").value=""; $("#fWmax").value=""; $("#fMap").value=""; $("#fSearch").value="";
+  state.rate="";
+  $("#fRate").querySelectorAll(".chip").forEach(ch=>ch.classList.toggle("on", ch.dataset.v===""));
+  $("#fMapType").value="";
+  $("#fSort").value="-players";
+  state.types=["all"];
+  $("#fType").querySelectorAll(".chip").forEach(ch=>ch.classList.toggle("on", ch.dataset.v==="all"));
+  $("#tHideEmpty").classList.add("on"); state.hideEmpty=true;
+  $("#tHideFull").classList.remove("on"); state.hideFull=false;
+  $("#tRecentWipe").classList.remove("on"); state.recentWipe=false;
+  $("#tFvRecycler").classList.remove("on"); state.fvRecycler=false;
+  readUI(); loadFresh();
+};
+
+// делегирование кликов по карточкам
+grid.addEventListener("click", e=>{
+  const con=e.target.closest("[data-connect]");
+  if(con){ window.location.href="steam://connect/"+con.dataset.connect; toast("Открываю Steam… (или скопируй IP в F1-консоль Rust)"); return; }
+  const cp=e.target.closest("[data-copy]");
+  if(cp){ navigator.clipboard.writeText("connect "+cp.dataset.copy).then(()=>toast("Скопировано: connect "+cp.dataset.copy)); return; }
+  const ds=e.target.closest(".desc");
+  if(ds){ ds.classList.toggle("open"); }
+});
+
+// старт
+readUI();
+loadFresh();
+</script>
+</body>
+</html>

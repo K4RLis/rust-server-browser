@@ -1,0 +1,7 @@
+# Собранный бинарник (его можно пересобрать через build.bat)
+RustServerBrowser.exe
+*.exe
+
+# Временные файлы сборки
+rsb_build/
+*.tmp
