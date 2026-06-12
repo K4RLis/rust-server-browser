@@ -471,9 +471,10 @@ function hasFvRecycler(a){
 // ---- client-side filters (то, что API не умеет) ----
 function passClient(a){
   const d=a.details||{};
-  // Steam-серверы не имеют гео — регион проверяем по тегам на клиенте
+  // Steam-серверы фильтруем на клиенте (у Steam нет серверной фильтрации по гео/поиску)
   if(a._source==="steam"){
     if(state.country) return false;                 // точную страну у Steam не определить
+    if(state.search.trim() && !(a.name||"").toLowerCase().includes(state.search.trim().toLowerCase())) return false;
     if(state.region){
       const tags=a._tags||[];
       const okEU = state.region==="EU" && tags.includes("EU");
@@ -481,6 +482,9 @@ function passClient(a){
       if(!okEU && !okNA) return false;
     }
   }
+  // диапазон игроков — на клиенте, чтобы и Steam соблюдал фильтр (раньше игнорировал)
+  if(state.pmin!=null && (a.players||0) < state.pmin) return false;
+  if(state.pmax!=null && (a.players||0) > state.pmax) return false;
   // тип
   const t=state.types;
   if(!t.includes("all")){
