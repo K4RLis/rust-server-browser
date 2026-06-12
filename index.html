@@ -768,7 +768,7 @@ async function loadFresh(){
     addServers(j.data);
     state.nextUrl = (j.links&&j.links.next)||null;
     render(true);
-    if(state.autoScan && state.nextUrl) scanAll();                  // фоновый полный скан всей базы
+    if(state.autoScan && state.nextUrl) scanAll(QUICK_PAGES);       // быстрый авто-скан (Steam уже дал основную массу)
     priorityScan(effectiveKeyword()).then(n=>{ if(n) render(true); }); // догружаем совпадения по фильтру
     ensureSteam().then(()=>{ if(steamCache&&steamCache.length&&addServers(steamCache)) render(true); }); // второй источник: Steam
   }catch(e){
@@ -791,18 +791,19 @@ async function loadMore(){
 
 // ---- сканер ВСЕХ серверов (учитывает rate-limit BattleMetrics: 60 запросов/мин) ----
 const SCAN_CAP = 100000;    // фактически вся база (скан идёт до конца или до Стоп)
-const SCAN_DELAY = 1100;    // мс между запросами (~54/мин < лимита 60)
+const QUICK_PAGES = 6;      // быстрый авто-скан: только топ BattleMetrics (Steam уже дал ~10к)
 let scanning=false, scanToken=null;
 
 function cancelScan(){ if(scanToken) scanToken.cancelled=true; scanning=false; }
 function stopScan(){ cancelScan(); render(false); toast("Сканирование остановлено"); }
 
-async function scanAll(){
+async function scanAll(maxPages){
   if(scanning) return;
+  maxPages = maxPages || Infinity;
   const token={cancelled:false}; scanToken=token; scanning=true;
   let url=state.nextUrl, page=0;
   render(false);
-  while(url && !token.cancelled && state.all.length<SCAN_CAP){
+  while(url && !token.cancelled && state.all.length<SCAN_CAP && page<maxPages){
     let j=null;
     try{ j=await fetchPage(url); }            // троттлинг и ретраи уже внутри fetchPage
     catch(e){ break; }
