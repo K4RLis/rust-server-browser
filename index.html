@@ -146,6 +146,7 @@
   .b-vanilla{background:rgba(67,181,129,.14);color:#5fd6a0;border-color:rgba(67,181,129,.3)}
   .b-pve{background:rgba(224,163,46,.14);color:#f0c46a;border-color:rgba(224,163,46,.3)}
   .b-rate{background:rgba(86,204,242,.14);color:#7fd3f5;border-color:rgba(86,204,242,.32)}
+  .b-steam{background:rgba(102,192,244,.16);color:#66c0f4;border-color:rgba(102,192,244,.35)}
   .b-region{background:var(--card2);color:var(--muted);border-color:var(--line)}
   .meta{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--muted)}
   .meta b{color:var(--txt);font-weight:600}
@@ -331,6 +332,7 @@
 
 <script>
 const API = "https://api.battlemetrics.com/servers";
+const STEAM_PROXY = "https://rust.krutoukirill.workers.dev";  // второй источник: Steam master-server
 
 // ---- регион -> страны ----
 const REGIONS = {
@@ -469,6 +471,16 @@ function hasFvRecycler(a){
 // ---- client-side filters (то, что API не умеет) ----
 function passClient(a){
   const d=a.details||{};
+  // Steam-серверы не имеют гео — регион проверяем по тегам на клиенте
+  if(a._source==="steam"){
+    if(state.country) return false;                 // точную страну у Steam не определить
+    if(state.region){
+      const tags=a._tags||[];
+      const okEU = state.region==="EU" && tags.includes("EU");
+      const okNA = state.region==="NA" && (tags.includes("NA")||tags.includes("US"));
+      if(!okEU && !okNA) return false;
+    }
+  }
   // тип
   const t=state.types;
   if(!t.includes("all")){
@@ -527,7 +539,8 @@ function cardHTML(s){
   else if(c.vanilla) badges.push('<span class="badge b-vanilla">VANILLA</span>');
   if(gr!=null) badges.push(`<span class="badge b-rate">${gr}x</span>`);
   if(c.pve) badges.push('<span class="badge b-pve">PVE</span>');
-  badges.push(`<span class="badge b-region">${flagEmoji(cc)} ${esc(regionOfCountry(cc))}</span>`);
+  if(a._source==="steam") badges.push('<span class="badge b-steam">🎮 Steam</span>');
+  else badges.push(`<span class="badge b-region">${flagEmoji(cc)} ${esc(regionOfCountry(cc))}</span>`);
 
   const desc = cleanDesc(d.rust_description);
   const nw = nextWipe(d.rust_next_wipe);
@@ -572,10 +585,19 @@ const DISPLAY_STEP = 500;
 let displayLimit = DISPLAY_STEP;
 function getFiltered(){ return state.all.filter(s=>passClient(s.attributes)); }
 function totalOnline(){ return state.all.reduce((s,x)=>s+(x.attributes.players||0),0); }
+// сортируем объединённый список (BattleMetrics + Steam) на клиенте по выбранному порядку
+function sortServers(arr){
+  const s=state.sort;
+  if(s==="players") arr.sort((a,b)=>(a.attributes.players||0)-(b.attributes.players||0));
+  else if(s==="name") arr.sort((a,b)=>(a.attributes.name||"").localeCompare(b.attributes.name||""));
+  else if(s==="rank") arr.sort((a,b)=>((a.attributes.rank!=null?a.attributes.rank:1e9))-((b.attributes.rank!=null?b.attributes.rank:1e9)));
+  else arr.sort((a,b)=>(b.attributes.players||0)-(a.attributes.players||0));
+  return arr;
+}
 
 function render(reset){
   if(reset) displayLimit = DISPLAY_STEP;
-  const filtered = getFiltered();
+  const filtered = sortServers(getFiltered());
   const slice = filtered.slice(0, displayLimit);
   grid.innerHTML = slice.map(cardHTML).join("");
   $("#countPill").textContent = `найдено ${fmt(filtered.length)} · показано ${fmt(slice.length)}`;
@@ -645,14 +667,44 @@ async function fetchPage(url){
   throw lastErr || new Error("сеть недоступна");
 }
 
-// ---- дедупликация: один сервер не добавляется в список дважды ----
+// ---- дедупликация по IP:порту (работает МЕЖДУ источниками BattleMetrics и Steam) ----
 const seen = new Set();
+function serverKey(s){
+  const a=s.attributes||{};
+  if(a.ip && a.port) return a.ip+":"+a.port;
+  return s.id;
+}
 function addServers(list){
   let n=0;
   for(const s of (list||[])){
-    if(s && s.id && !seen.has(s.id)){ seen.add(s.id); state.all.push(s); n++; }
+    if(!s) continue;
+    const k=serverKey(s);
+    if(k && !seen.has(k)){ seen.add(k); state.all.push(s); n++; }
   }
   return n;
+}
+// ---- второй источник: Steam master-server через прокси (один запрос ≈ 10000 серверов) ----
+let steamCache = null;
+function steamAdapt(s){
+  const addr=s.addr||""; const i=addr.lastIndexOf(":");
+  const ip = i>0 ? addr.slice(0,i) : addr;
+  const port = (s.gameport || (i>0?+addr.slice(i+1):0)) || 0;
+  const tags = (s.gametype||"").split(",");
+  return { id:"steam:"+addr, attributes:{
+    id:"steam:"+addr, name:s.name||"", players:s.players||0, maxPlayers:s.max_players||0,
+    ip:ip, port:port, country:"", rank:null, _source:"steam", _tags:tags,
+    details:{ map:s.map||"", rust_type:(/modded/i.test(s.gametype||"")?"modded":""),
+      official:false, pve:/\bpve\b/i.test(s.name||""), rust_description:"" }
+  }};
+}
+async function ensureSteam(){
+  if(steamCache || !STEAM_PROXY) return;
+  try{
+    const r = await fetch(STEAM_PROXY+"/?limit=20000");
+    if(!r.ok){ steamCache=[]; return; }
+    const d = await r.json();
+    steamCache = (d.servers||[]).map(steamAdapt);
+  }catch(e){ steamCache=[]; }
 }
 // ключевое слово для серверного поиска: мгновенно отдаёт релевантные совпадения,
 // которые медленный скан по онлайну закопал бы глубоко (vanilla-2x и т.п.)
@@ -718,6 +770,7 @@ async function loadFresh(){
     render(true);
     if(state.autoScan && state.nextUrl) scanAll();                  // фоновый полный скан всей базы
     priorityScan(effectiveKeyword()).then(n=>{ if(n) render(true); }); // догружаем совпадения по фильтру
+    ensureSteam().then(()=>{ if(steamCache&&steamCache.length&&addServers(steamCache)) render(true); }); // второй источник: Steam
   }catch(e){
     stateZone.innerHTML = `<div class="state"><div class="big">⚠️</div>Не удалось загрузить.<br><small>${esc(e.message)}</small><br><br><button class="btn" style="max-width:200px;margin:0 auto" onclick="loadFresh()">Повторить</button></div>`;
   }finally{ state.loading=false; }
