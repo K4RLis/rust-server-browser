@@ -395,13 +395,15 @@ function toast(msg){
 }
 
 // ---- build API url ----
-function buildUrl(){
+function buildUrl(opts){
+  opts=opts||{};
   const p = new URLSearchParams();
   p.set("filter[game]","rust");
   p.set("filter[status]","online");
   p.set("page[size]","100");
   p.set("sort", state.sort);
-  if(state.search.trim()) p.set("filter[search]", state.search.trim());
+  const searchVal=(opts.search!==undefined)?opts.search:state.search.trim();
+  if(searchVal) p.set("filter[search]", searchVal);
   if(state.pmin!=null) p.set("filter[players][min]", state.pmin);
   if(state.pmax!=null) p.set("filter[players][max]", state.pmax);
 
@@ -615,17 +617,52 @@ async function fetchPage(url){
 }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
+// ---- дедупликация: один сервер не добавляется в список дважды ----
+const seen = new Set();
+function addServers(list){
+  let n=0;
+  for(const s of (list||[])){
+    if(s && s.id && !seen.has(s.id)){ seen.add(s.id); state.all.push(s); n++; }
+  }
+  return n;
+}
+// ключевое слово для серверного поиска: мгновенно отдаёт релевантные совпадения,
+// которые медленный скан по онлайну закопал бы глубоко (vanilla-2x и т.п.)
+function effectiveKeyword(){
+  if(state.search.trim()) return "";                 // пользователь уже ищет сам
+  const t=state.types;
+  if(t.length===1 && t[0]==="vanilla") return "vanilla";
+  if(state.rate==="2") return "2x";
+  if(state.rate==="3") return "3x";
+  if(state.rate==="5") return "5x";
+  if(state.rate==="10") return "10x";
+  if(state.rate==="100") return "100x";
+  return "";
+}
+// приоритетный серверный поиск по текущему ключевому слову (НЕ сбрасывает фоновый скан)
+async function priorityFetch(){
+  render(true);                                       // мгновенно применяем клиентский фильтр
+  const kw=effectiveKeyword();
+  if(kw){
+    try{ const js=await fetchPage(buildUrl({search:kw})); if(addServers(js.data)) render(true); }catch(e){}
+  }
+}
+
 async function loadFresh(){
   cancelScan();
-  state.loading=true; state.all=[]; state.nextUrl=null;
+  state.loading=true; state.all=[]; state.nextUrl=null; seen.clear();
   grid.innerHTML="";
   stateZone.innerHTML = `<div class="state"><div class="spinner"></div>Загружаю серверы…</div>`;
   try{
+    // 1) приоритетный серверный поиск — мгновенные точные совпадения по фильтру
+    const kw=effectiveKeyword();
+    if(kw){ try{ const js=await fetchPage(buildUrl({search:kw})); addServers(js.data); }catch(e){} }
+    // 2) основной запрос + фоновый полный скан всей базы (добирает хвост, дедуп по id)
     const j = await fetchPage(buildUrl());
-    state.all = j.data||[];
+    addServers(j.data);
     state.nextUrl = (j.links&&j.links.next)||null;
     render(true);
-    if(state.autoScan && state.nextUrl) scanAll();   // фоновый дозагруз ВСЕХ серверов
+    if(state.autoScan && state.nextUrl) scanAll();
   }catch(e){
     stateZone.innerHTML = `<div class="state"><div class="big">⚠️</div>Не удалось загрузить.<br><small>${esc(e.message)}</small><br><br><button class="btn" style="max-width:200px;margin:0 auto" onclick="loadFresh()">Повторить</button></div>`;
   }finally{ state.loading=false; }
@@ -637,7 +674,7 @@ async function loadMore(){
   const b=$("#btnMore"); if(b){b.textContent="Загрузка…";b.disabled=true;}
   try{
     const j = await fetchPage(state.nextUrl);
-    state.all = state.all.concat(j.data||[]);
+    addServers(j.data);
     state.nextUrl = (j.links&&j.links.next)||null;
     render(false);
   }catch(e){ toast("Ошибка загрузки"); }
@@ -666,7 +703,7 @@ async function scanAll(){
       catch(e){ await sleep(5000*(k+1)); }   // backoff при 429 / обрыве сети
     }
     if(!j || token.cancelled) break;
-    state.all = state.all.concat(j.data||[]);
+    addServers(j.data);
     state.nextUrl = (j.links&&j.links.next)||null;
     url = state.nextUrl; page++;
     // пока экран не заполнен — показываем новые карточки; дальше при -players топ стабилен,
@@ -718,7 +755,7 @@ $("#fType").addEventListener("click", e=>{
     if(state.types.length===0) state.types=["all"];
   }
   $("#fType").querySelectorAll(".chip").forEach(ch=>ch.classList.toggle("on", state.types.includes(ch.dataset.v)));
-  render(true);
+  priorityFetch();
 });
 
 function bindToggle(id,key){
@@ -752,7 +789,7 @@ $("#fRate").addEventListener("click", e=>{
   const c=e.target.closest(".chip"); if(!c) return;
   state.rate = (state.rate===c.dataset.v) ? "" : c.dataset.v;
   $("#fRate").querySelectorAll(".chip").forEach(ch=>ch.classList.toggle("on", ch.dataset.v===state.rate));
-  render(true);
+  priorityFetch();
 });
 ["#fPmin","#fPmax","#fCountry","#fRegion"].forEach(id=>$(id).addEventListener("change",()=>{ readUI(); loadFresh(); }));
 
