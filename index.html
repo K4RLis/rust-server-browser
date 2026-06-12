@@ -669,14 +669,27 @@ function effectiveKeyword(){
 }
 // серверный поиск по ключевому слову. Поиск BattleMetrics капится на ~100 за запрос,
 // поэтому бьём по диапазонам онлайна — ловим и популярные, и средние, и мелкие совпадения.
+// диапазоны онлайна для дробления поиска — ВНУТРИ пользовательского фильтра по игрокам
+function priorityBands(){
+  const umin = state.pmin!=null ? state.pmin : 0;
+  const umax = state.pmax!=null ? state.pmax : 1000000;
+  const raw = [[200,1000000],[50,199],[10,49],[1,9]];
+  const bands=[];
+  for(const r of raw){
+    const lo=Math.max(r[0],umin), hi=Math.min(r[1],umax);
+    if(lo<=hi) bands.push({pmin:lo, pmax:(hi>=1000000?undefined:hi)});
+  }
+  return bands.length?bands:[{}];
+}
 async function priorityScan(kw){
   if(!kw) return 0;
   let added=0;
-  const bands = (state.pmin==null && state.pmax==null)
-    ? [{pmin:60},{pmin:10,pmax:59},{pmin:1,pmax:9}]
-    : [{}];
-  for(const b of bands){
-    try{ const js=await fetchPage(buildUrl(Object.assign({search:kw}, b))); added+=addServers(js.data); }catch(e){}
+  for(const b of priorityBands()){
+    try{
+      const js=await fetchPage(buildUrl(Object.assign({search:kw}, b)));
+      const n=addServers(js.data);
+      if(n){ added+=n; render(false); }     // прогрессивно показываем найденное
+    }catch(e){}
   }
   return added;
 }
