@@ -564,7 +564,7 @@ function cardHTML(s){
 }
 
 // ---- render list (карточек в DOM не больше displayLimit — иначе тысячи серверов повесят браузер) ----
-const DISPLAY_STEP = 300;
+const DISPLAY_STEP = 500;
 let displayLimit = DISPLAY_STEP;
 function getFiltered(){ return state.all.filter(s=>passClient(s.attributes)); }
 function totalOnline(){ return state.all.reduce((s,x)=>s+(x.attributes.players||0),0); }
@@ -645,8 +645,8 @@ async function loadMore(){
 }
 
 // ---- сканер ВСЕХ серверов (учитывает rate-limit BattleMetrics: 60 запросов/мин) ----
-const SCAN_CAP = 20000;     // предохранитель от бесконечности
-const SCAN_DELAY = 1150;    // мс между запросами (~52/мин < лимита 60)
+const SCAN_CAP = 100000;    // фактически вся база (скан идёт до конца или до Стоп)
+const SCAN_DELAY = 1100;    // мс между запросами (~54/мин < лимита 60)
 let scanning=false, scanToken=null;
 
 function cancelScan(){ if(scanToken) scanToken.cancelled=true; scanning=false; }
