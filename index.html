@@ -404,8 +404,10 @@ function buildUrl(opts){
   p.set("sort", state.sort);
   const searchVal=(opts.search!==undefined)?opts.search:state.search.trim();
   if(searchVal) p.set("filter[search]", searchVal);
-  if(state.pmin!=null) p.set("filter[players][min]", state.pmin);
-  if(state.pmax!=null) p.set("filter[players][max]", state.pmax);
+  const pminV=(opts.pmin!==undefined)?opts.pmin:state.pmin;
+  const pmaxV=(opts.pmax!==undefined)?opts.pmax:state.pmax;
+  if(pminV!=null) p.set("filter[players][min]", pminV);
+  if(pmaxV!=null) p.set("filter[players][max]", pmaxV);
 
   // страны: приоритет — конкретная страна, иначе регион
   let countries=[];
@@ -665,14 +667,24 @@ function effectiveKeyword(){
   if(state.rate==="100") return "100x";
   return "";
 }
-// приоритетный серверный поиск по ключевому слову (НЕ сбрасывает фоновый скан)
-async function priorityFetch(){
-  const kw=effectiveKeyword();
-  if(!kw) return;
-  try{ const js=await fetchPage(buildUrl({search:kw})); if(addServers(js.data)) render(true); }catch(e){}
+// серверный поиск по ключевому слову. Поиск BattleMetrics капится на ~100 за запрос,
+// поэтому бьём по диапазонам онлайна — ловим и популярные, и средние, и мелкие совпадения.
+async function priorityScan(kw){
+  if(!kw) return 0;
+  let added=0;
+  const bands = (state.pmin==null && state.pmax==null)
+    ? [{pmin:60},{pmin:10,pmax:59},{pmin:1,pmax:9}]
+    : [{}];
+  for(const b of bands){
+    try{ const js=await fetchPage(buildUrl(Object.assign({search:kw}, b))); added+=addServers(js.data); }catch(e){}
+  }
+  return added;
 }
-// дебаунс: клики по чипам сразу фильтруют уже загруженное, а серверный поиск
-// шлётся один раз через паузу (серия кликов не плодит лишние запросы)
+async function priorityFetch(){
+  const n = await priorityScan(effectiveKeyword());
+  if(n) render(true);
+}
+// дебаунс: клики по чипам сразу фильтруют уже загруженное, а серверный поиск — через паузу
 let _pfTimer;
 function priorityFetchSoon(){
   render(true);
@@ -686,15 +698,13 @@ async function loadFresh(){
   grid.innerHTML="";
   stateZone.innerHTML = `<div class="state"><div class="spinner"></div>Загружаю серверы…</div>`;
   try{
-    // 1) приоритетный серверный поиск — мгновенные точные совпадения по фильтру
-    const kw=effectiveKeyword();
-    if(kw){ try{ const js=await fetchPage(buildUrl({search:kw})); addServers(js.data); }catch(e){} }
-    // 2) основной запрос + фоновый полный скан всей базы (добирает хвост, дедуп по id)
+    // основной запрос — быстрый первый экран
     const j = await fetchPage(buildUrl());
     addServers(j.data);
     state.nextUrl = (j.links&&j.links.next)||null;
     render(true);
-    if(state.autoScan && state.nextUrl) scanAll();
+    if(state.autoScan && state.nextUrl) scanAll();                  // фоновый полный скан всей базы
+    priorityScan(effectiveKeyword()).then(n=>{ if(n) render(true); }); // догружаем совпадения по фильтру
   }catch(e){
     stateZone.innerHTML = `<div class="state"><div class="big">⚠️</div>Не удалось загрузить.<br><small>${esc(e.message)}</small><br><br><button class="btn" style="max-width:200px;margin:0 auto" onclick="loadFresh()">Повторить</button></div>`;
   }finally{ state.loading=false; }
