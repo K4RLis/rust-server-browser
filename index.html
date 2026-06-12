@@ -52,8 +52,12 @@
   .panel{
     background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
     padding:18px;align-self:start;position:sticky;top:84px;
+    max-height:calc(100vh - 100px);overflow-y:auto;
+    scrollbar-width:thin;scrollbar-color:var(--line) transparent;
   }
-  @media(max-width:920px){.panel{position:static}}
+  .panel::-webkit-scrollbar{width:8px}
+  .panel::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+  @media(max-width:920px){.panel{position:static;max-height:none;overflow:visible}}
   .panel h3{margin:0 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
   .fgroup{margin:18px 0 0}
   .fgroup:first-of-type{margin-top:14px}
