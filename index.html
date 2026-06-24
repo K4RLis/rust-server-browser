@@ -587,6 +587,7 @@ function cardHTML(s){
 // ---- render list (карточек в DOM не больше displayLimit — иначе тысячи серверов повесят браузер) ----
 const DISPLAY_STEP = 500;
 let displayLimit = DISPLAY_STEP;
+let _lastFiltered = [];
 function getFiltered(){ return state.all.filter(s=>passClient(s.attributes)); }
 function totalOnline(){ return state.all.reduce((s,x)=>s+(x.attributes.players||0),0); }
 // сортируем объединённый список (BattleMetrics + Steam) на клиенте по выбранному порядку
@@ -602,11 +603,25 @@ function sortServers(arr){
 function render(reset){
   if(reset) displayLimit = DISPLAY_STEP;
   const filtered = sortServers(getFiltered());
+  _lastFiltered = filtered;
   const slice = filtered.slice(0, displayLimit);
   grid.innerHTML = slice.map(cardHTML).join("");
   $("#countPill").textContent = `найдено ${fmt(filtered.length)} · показано ${fmt(slice.length)}`;
   updateStats(); updateScanBtn();
-
+  renderZone(filtered.length, slice.length);
+}
+// «Показать ещё» ДОБАВЛЯЕТ карточки в конец, а не перестраивает весь список — мгновенно даже на тысячах
+function showMore(){
+  const filtered = _lastFiltered;
+  const from = grid.children.length;
+  displayLimit = from + DISPLAY_STEP;
+  const slice = filtered.slice(from, displayLimit);
+  grid.insertAdjacentHTML("beforeend", slice.map(cardHTML).join(""));
+  const shown = grid.children.length;
+  $("#countPill").textContent = `найдено ${fmt(filtered.length)} · показано ${fmt(shown)}`;
+  renderZone(filtered.length, shown);
+}
+function renderZone(filteredLen, shownLen){
   let zone = "";
   if(scanning){
     zone += `<div class="scanbar"><span class="dot"></span>Сканирую базу серверов…
@@ -614,15 +629,15 @@ function render(reset){
       реальный онлайн <b id="scanOnline">${fmt(totalOnline())}</b> игроков
       <button class="act" id="btnStopScan" style="margin-left:auto">⏹ Остановить</button></div>`;
   }
-  if(filtered.length > slice.length){
-    zone += `<button class="btn loadmore" id="btnShowMore">Показать ещё ${DISPLAY_STEP} ↓ <span style="opacity:.7">(ещё ${fmt(filtered.length-slice.length)})</span></button>`;
+  if(filteredLen > shownLen){
+    zone += `<button class="btn loadmore" id="btnShowMore">Показать ещё ${DISPLAY_STEP} ↓ <span style="opacity:.7">(ещё ${fmt(filteredLen-shownLen)})</span></button>`;
   } else if(!scanning && state.nextUrl){
     zone += `<button class="btn loadmore" id="btnMore">Загрузить ещё ↓</button>`;
-  } else if(filtered.length===0 && !state.loading && !scanning){
+  } else if(filteredLen===0 && !state.loading && !scanning){
     zone = `<div class="state"><div class="big">🔍</div>Ничего не найдено.<br>Попробуй ослабить фильтры.</div>`;
   }
   stateZone.innerHTML = zone;
-  const sm=$("#btnShowMore"); if(sm) sm.onclick=()=>{ displayLimit+=DISPLAY_STEP; render(false); };
+  const sm=$("#btnShowMore"); if(sm) sm.onclick=showMore;
   const bm=$("#btnMore");     if(bm) bm.onclick=()=>loadMore();
   const ss=$("#btnStopScan"); if(ss) ss.onclick=()=>stopScan();
 }
